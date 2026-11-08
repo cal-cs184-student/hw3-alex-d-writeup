@@ -107,6 +107,72 @@
 		</div>
 
 
+
+		<h2>Part 2: Bounding Volume Hierarchy</h2>
+
+		<h3>BVH construction</h3>
+		<p>The BVH is a binary tree where each node stores a bounding box around its primitives. <code>construct_bvh</code> builds it recursively. For a list of primitives, I first compute the bounding box of all of them and make a node with that box. If there are at most <code>max_leaf_size</code> primitives, the node becomes a leaf, and its <code>start</code> and <code>end</code> iterators point at that range of the primitive vector.</p>
+
+		<p>Otherwise I split the primitives into two groups. I pick the axis along which the primitives' bounding box centroids are most spread out, since splitting along the longest extent separates the geometry best. The split point is the average centroid along that axis. <code>std::partition</code> then reorders the primitives in place so that those with centroids below the split come first, and the two halves are built recursively as the left and right children. Because the partition happens in place, every leaf's iterators point at a contiguous range of the original vector, and no primitives are copied.</p>
+
+		<p>I chose the average centroid because it adapts to how the primitives are distributed. A midpoint split can leave one side nearly empty when a mesh has a dense region, while the average follows the dense region. If every centroid still lands on one side (for example, when they are all equal), recursing on the same list would never end. In that case I fall back to splitting at the median primitive with <code>std::nth_element</code>, which always puts half the primitives on each side.</p>
+
+		<h3>Bounding box intersection</h3>
+		<p>A box is the intersection of three slabs, one pair of axis-aligned planes per axis. For the plane \(x = p'_x\), the ray hits at \(t = \frac{p'_x - o_x}{d_x}\), which gives an entry and exit time \([t_{x,min}, t_{x,max}]\) for the x slab. The ray is inside the box where all three slab intervals overlap:</p>
+		\[ t_{enter} = \max(t_{x,min}, t_{y,min}, t_{z,min}), \quad t_{exit} = \min(t_{x,max}, t_{y,max}, t_{z,max}). \]
+		<p>I also clamp this interval to the ray's \([t_{min}, t_{max}]\). The ray hits the box if \(t_{enter} \le t_{exit}\), which also covers rays that start or end inside the box.</p>
+
+		<h3>BVH intersection</h3>
+		<p>Traversal starts at the root. If the ray misses a node's box, nothing inside it can be hit, so the whole subtree is skipped. At a leaf, the ray is tested against each primitive. At an interior node, I recurse into both children. <code>intersect</code> has to check both children even after one reports a hit, because the boxes can overlap and the other child might hold a closer surface. Since each primitive already shrinks \(t_{max}\) when it records a hit, the closest hit wins, and later box tests reject anything farther away. <code>has_intersection</code> only needs to know whether any hit exists, so it returns as soon as one child reports one.</p>
+
+		<h3>Results</h3>
+		<p>With the BVH, these large meshes render with normal shading in under 0.05 s each. Without it, they would take minutes.</p>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p2_maxplanck.png" width="400px">
+				  <figcaption>maxplanck.dae</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p2_CBlucy.png" width="400px">
+				  <figcaption>CBlucy.dae</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p2_CBdragon.png" width="400px">
+				  <figcaption>CBdragon.dae</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p2_beast.png" width="400px">
+				  <figcaption>beast.dae</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p2_peter.png" width="400px">
+				  <figcaption>peter.dae</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p2_wall-e.png" width="400px">
+				  <figcaption>wall-e.dae</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+
+		<h3>Timing comparison</h3>
+		<table style="margin: 0 auto; border-collapse: collapse; text-align: right;" cellpadding="6">
+			  <tr><th style="text-align: left;">Scene</th><th>Primitives</th><th>Without BVH</th><th>With BVH</th><th>Speedup</th></tr>
+			  <tr><td>cow.dae</td><td>5,856</td><td>1.92 s</td><td>0.029 s</td><td>66&times;</td></tr>
+			  <tr><td>teapot.dae</td><td>2,464</td><td>0.91 s</td><td>0.025 s</td><td>36&times;</td></tr>
+			  <tr><td>beetle.dae</td><td>7,558</td><td>2.18 s</td><td>0.019 s</td><td>118&times;</td></tr>
+			  <tr><td>CBbunny.dae</td><td>28,588</td><td>8.43 s</td><td>0.024 s</td><td>350&times;</td></tr>
+			  <tr><td>maxplanck.dae</td><td>50,801</td><td>19.37 s</td><td>0.036 s</td><td>540&times;</td></tr>
+		</table>
+		<p>All times are for 800&times;600 renders with 8 threads and 1 sample per pixel. Without a BVH, each ray is tested against every primitive, so render time grows linearly with the primitive count: maxplanck has about 20 times as many primitives as the teapot and took about 20 times as long. With the BVH, render time hardly changes with scene size. Every scene finished in 0.02 to 0.04 s, because a ray only descends into the boxes it actually hits, which makes the cost about \(O(\log n)\) instead of \(O(n)\). The renderer's statistics show this directly: with the BVH, a ray averaged only 2 to 6 primitive intersection tests in every scene. The speedup therefore grows with scene size, from 36&times; on the teapot to 540&times; on maxplanck.</p>
+
 		</div>
 	
 
