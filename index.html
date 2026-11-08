@@ -173,6 +173,85 @@
 		</table>
 		<p>All times are for 800&times;600 renders with 8 threads and 1 sample per pixel. Without a BVH, each ray is tested against every primitive, so render time grows linearly with the primitive count: maxplanck has about 20 times as many primitives as the teapot and took about 20 times as long. With the BVH, render time hardly changes with scene size. Every scene finished in 0.02 to 0.04 s, because a ray only descends into the boxes it actually hits, which makes the cost about \(O(\log n)\) instead of \(O(n)\). The renderer's statistics show this directly: with the BVH, a ray averaged only 2 to 6 primitive intersection tests in every scene. The speedup therefore grows with scene size, from 36&times; on the teapot to 540&times; on maxplanck.</p>
 
+
+		<h2>Part 3: Direct Illumination</h2>
+
+		<h3>Diffuse BSDF and zero-bounce light</h3>
+		<p>A diffuse (Lambertian) surface scatters light equally in every direction, so its BSDF is a constant, \(f = \frac{\rho}{\pi}\), where \(\rho\) is the surface's reflectance. Zero-bounce light is light that goes straight from a light source to the camera, so <code>zero_bounce_radiance</code> just returns the emission of the surface the camera ray hits. That is why only the area light shows up when the max ray depth is 0.</p>
+
+		<h3>Direct lighting</h3>
+		<p>Direct lighting is the light that reaches a hit point \(p\) straight from a light source and then reflects toward the camera. It is given by the reflection equation, which I estimate with Monte Carlo:</p>
+		\[ L_{out}(p, \omega_o) \approx \frac{1}{N} \sum_{j=1}^{N} \frac{f(\omega_j \to \omega_o)\, L_{in}(p, \omega_j) \cos\theta_j}{p(\omega_j)}. \]
+		<p>Both of my direct lighting functions use this estimator. They differ only in how they choose the incoming directions \(\omega_j\). The BSDF is evaluated in the local frame at the hit point, where the normal is \(z\), so \(\cos\theta_j\) is just the \(z\) component of \(\omega_j\). Rays are cast in world space, so I convert directions with <code>o2w</code>. Every ray leaving a surface starts at \(t_{min} = \epsilon\) so it doesn't hit the surface it came from.</p>
+
+		<p>Uniform hemisphere sampling picks \(N\) directions uniformly over the hemisphere around the normal, so \(p(\omega_j) = \frac{1}{2\pi}\). For each direction, I cast a ray from \(p\). If it hits something, that surface's emission is \(L_{in}\), and anything that isn't a light has zero emission. Most of these rays miss the light, so they add nothing.</p>
+
+		<p>Light sampling (importance sampling) picks directions toward the lights instead. For each light, <code>sample_L</code> gives a direction toward a point on the light, its distance, its radiance and its pdf. I skip samples where the light is behind the surface (\(\cos\theta \le 0\)). Otherwise I cast a shadow ray toward the light with \(t_{max}\) = distance \(- \epsilon\). If nothing blocks it, the sample adds its term to the sum. Area lights get <code>ns_area_light</code> samples each. Point lights get one sample, since every sample of a point light is the same. Because every sample is aimed at a light, this also works for point lights, which uniform hemisphere sampling can never hit.</p>
+
+		<h3>Uniform hemisphere vs. light sampling</h3>
+		<p>Both use 64 samples per pixel and 32 light rays.</p>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p3_CBbunny_H.png" width="400px">
+				  <figcaption>CBbunny.dae, hemisphere</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p3_CBbunny_L.png" width="400px">
+				  <figcaption>CBbunny.dae, light sampling</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p3_CBspheres_lambertian_H.png" width="400px">
+				  <figcaption>CBspheres_lambertian.dae, hemisphere</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p3_CBspheres_lambertian_L.png" width="400px">
+				  <figcaption>CBspheres_lambertian.dae, light sampling</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+
+		<div style="text-align: center;">
+			<img src="assets/p3_dragon_L.png" width="400px">
+			<figcaption>dragon.dae, light sampling</figcaption>
+		</div>
+
+		<h3>Light rays and soft shadows</h3>
+		<p>These use CBbunny with 1 sample per pixel and light sampling, varying the number of light rays (<code>-l</code>).</p>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p3_l1.png" width="400px">
+				  <figcaption>1 light ray</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p3_l4.png" width="400px">
+				  <figcaption>4 light rays</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p3_l16.png" width="400px">
+				  <figcaption>16 light rays</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p3_l64.png" width="400px">
+				  <figcaption>64 light rays</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+
+		<p>With 1 light ray, each point in the soft shadow is either fully lit or fully dark, depending on whether its single shadow ray happened to reach the light. That makes the shadow under the bunny a speckle of black and white pixels. With more light rays, each point averages over more points on the area light, so it gets the right fraction of lit samples. At 16 rays the penumbra is a smooth gradient with light grain, and at 64 rays it is almost noise-free.</p>
+
+		<h3>Analysis</h3>
+		<p>With the same number of samples, light sampling is far less noisy than uniform hemisphere sampling. The area light covers only a small part of the hemisphere above each point, so most uniform samples miss it and add zero, while the few that hit add a large value. That gives a high-variance estimate, which shows up as grain over every surface in the hemisphere renders. Light sampling sends every sample toward the light, so a sample is wasted only when the point is actually in shadow. The result is smooth walls and clean soft shadows at the same sample count, and the light-sampled bunny even rendered faster (18 s vs. 28 s). Both methods converge to the same image, but light sampling gets there with far fewer samples. One visible difference is that the hemisphere renders show a glow around the light on the ceiling. Hemisphere sampling treats the light as emitting in every direction, while the light-sampling code models the area light's direction of emission.</p>
+
 		</div>
 	
 
