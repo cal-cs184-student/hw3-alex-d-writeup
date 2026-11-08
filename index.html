@@ -45,7 +45,7 @@
 		<p>A ray is \(\mathbf{r}(t) = \mathbf{o} + t\mathbf{d},\; 0 \le t &lt; \infty\). To supersample each pixel, <code>raytrace_pixel</code> picks <code>ns_aa</code> random points inside the pixel, generates a ray through each, and averages the radiance they return, which is a Monte Carlo estimate of the pixel's value.</p>
 
 		<p><code>generate_ray</code> maps a normalized image point \((x, y) \in [0,1]^2\) onto the sensor at \(z = -1\) in camera space:</p>
-		\[ \mathbf{D}_{cam} = \left((2x-1)\tan\tfrac{hFov}{2},\; (2y-1)\tan\tfrac{vFov}{2},\; -1\right). \]
+		\[ \mathbf{D}_{cam} = \left((2x-1)\tan\frac{hFov}{2},\; (2y-1)\tan\frac{vFov}{2},\; -1\right). \]
 		<p>The ray starts at the camera position. I rotate \(\mathbf{D}_{cam}\) into world space with <code>c2w</code> and normalize it to get the direction.</p>
 
 		<h3>Primitive intersection</h3>
@@ -57,7 +57,7 @@
 
 		<h3>Triangle intersection algorithm</h3>
 		<p>I used the Möller-Trumbore algorithm. A hit point on triangle \(P_0P_1P_2\) can be written with barycentric weights as \(\mathbf{O} + t\mathbf{D} = (1-b_1-b_2)\mathbf{P}_0 + b_1\mathbf{P}_1 + b_2\mathbf{P}_2\). Solving these three equations for the three unknowns gives</p>
-		\[ \begin{bmatrix} t \\ b_1 \\ b_2 \end{bmatrix} = \frac{1}{\mathbf{S}_1 \cdot \mathbf{E}_1} \begin{bmatrix} \mathbf{S}_2 \cdot \mathbf{E}_2 \\ \mathbf{S}_1 \cdot \mathbf{S} \\ \mathbf{S}_2 \cdot \mathbf{D} \end{bmatrix} \]
+		\[ \left[\begin{array}{c} t \\ b_1 \\ b_2 \end{array}\right] = \frac{1}{\mathbf{S}_1 \cdot \mathbf{E}_1} \left[\begin{array}{c} \mathbf{S}_2 \cdot \mathbf{E}_2 \\ \mathbf{S}_1 \cdot \mathbf{S} \\ \mathbf{S}_2 \cdot \mathbf{D} \end{array}\right] \]
 		<p>with \(\mathbf{E}_1 = \mathbf{P}_1 - \mathbf{P}_0\), \(\mathbf{E}_2 = \mathbf{P}_2 - \mathbf{P}_0\), \(\mathbf{S} = \mathbf{O} - \mathbf{P}_0\), \(\mathbf{S}_1 = \mathbf{D} \times \mathbf{E}_2\) and \(\mathbf{S}_2 = \mathbf{S} \times \mathbf{E}_1\). The ray hits the triangle when \(b_1, b_2 \ge 0\), \(b_1 + b_2 \le 1\) and \(t\) is in range. A denominator near zero means the ray is parallel to the triangle, so it misses. I blend the three vertex normals with the same weights, which makes curved meshes look smooth.</p>
 
 		<h3>Results</h3>
