@@ -1,7 +1,6 @@
-<html>
-	<head>
-		<script src='https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.4/MathJax.js?config=default'></script>
-		<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<html><head>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.4/MathJax.js?config=default"></script>
+		<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&amp;display=swap" rel="stylesheet">
 		<style>
 			h1 {
 				text-align: center;
@@ -28,79 +27,87 @@
 	<body>
 		<div class="container">
 		<h1>CS184/284A Fall 2026 Homework 3 Write-Up</h1>
-		<div style="text-align: center;">Names: </div>
+		<div style="text-align: center;">Names: Alex Dils</div>
 
 		<br>
 
-		Link to webpage: (TODO) <a href="https://cs184.eecs.berkeley.edu/fa26">cs184.eecs.berkeley.edu/fa26</a>
-		Link to GitHub repository: (TODO) <a href="https://cs184.eecs.berkeley.edu/fa26">cs184.eecs.berkeley.edu/fa26</a>
-		
-		<figure>
-			<img src="assets/cornell.png" alt="Cornell Boxes with Bunnies" style="width:70%"/>
-			<figcaption>You can add images with captions!</figcaption>
-		</figure>
+		Link to webpage: <a href="https://cal-cs184-student.github.io/hw3-alex-d-writeup/">cal-cs184-student.github.io/hw3-alex-d-writeup</a>
+		<br>
+		Link to GitHub repository: <a href="https://github.com/cal-cs184-student/hw3-alex-d">github.com/cal-cs184-student/hw3-alex-d</a>
 
 		<!--
 		We've already added one heading per part, to make your write-up as navigable when grading. Please fit your write-up within these sections!
 		-->
 
-		<h2>Overview</h2>
-		Give a high-level overview of what you implemented in this homework. Think about what you've built as a whole. Share your thoughts on what interesting things you've learned from completing the homework.
-
 		<h2>Part 1: Ray Generation and Scene Intersection</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
 
-		<p>Here is an example 2x2 gridlike structure using an HTML table. Each <b>tr</b> is a row and each <b>td</b> is a column in that row. You might find this useful for framing and showing your result images in an organized fashion.</p>
+		<h3>Ray generation</h3>
+		<p>A ray is \(\mathbf{r}(t) = \mathbf{o} + t\mathbf{d},\; 0 \le t &lt; \infty\). To supersample each pixel, <code>raytrace_pixel</code> picks <code>ns_aa</code> random points inside the pixel, generates a ray through each, and averages the radiance they return, which is a Monte Carlo estimate of the pixel's value.</p>
+
+		<p><code>generate_ray</code> maps a normalized image point \((x, y) \in [0,1]^2\) onto the sensor at \(z = -1\) in camera space:</p>
+		\[ \mathbf{D}_{cam} = \left((2x-1)\tan\tfrac{hFov}{2},\; (2y-1)\tan\tfrac{vFov}{2},\; -1\right). \]
+		<p>The ray starts at the camera position. I rotate \(\mathbf{D}_{cam}\) into world space with <code>c2w</code> and normalize it to get the direction.</p>
+
+		<h3>Primitive intersection</h3>
+		<p>Each ray is tested against every primitive. A hit counts only if \(t_{min} \le t \le t_{max}\), and each valid hit sets \(t_{max} \leftarrow t\), so later primitives must be closer to count. The closest hit is left at the end, and its \(t\), normal, primitive and BSDF are stored. For now, the pixel is colored by the normal.</p>
+
+		<p>For a sphere with center \(\mathbf{c}\) and radius \(R\), setting \(\mathbf{p} = \mathbf{r}(t)\) in \((\mathbf{p} - \mathbf{c})^2 - R^2 = 0\) gives a quadratic \(at^2 + bt + c = 0\) with \(a = \mathbf{d}\cdot\mathbf{d}\), \(b = 2(\mathbf{o}-\mathbf{c})\cdot\mathbf{d}\) and \(c = (\mathbf{o}-\mathbf{c})\cdot(\mathbf{o}-\mathbf{c}) - R^2\), so</p>
+		\[ t = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}. \]
+		<p>A negative discriminant means a miss. Otherwise I take the nearest root in range. The normal points from \(\mathbf{c}\) to the hit point.</p>
+
+		<h3>Triangle intersection algorithm</h3>
+		<p>I used the Möller-Trumbore algorithm. A hit point on triangle \(P_0P_1P_2\) can be written with barycentric weights as \(\mathbf{O} + t\mathbf{D} = (1-b_1-b_2)\mathbf{P}_0 + b_1\mathbf{P}_1 + b_2\mathbf{P}_2\). Solving these three equations for the three unknowns gives</p>
+		\[ \begin{bmatrix} t \\ b_1 \\ b_2 \end{bmatrix} = \frac{1}{\mathbf{S}_1 \cdot \mathbf{E}_1} \begin{bmatrix} \mathbf{S}_2 \cdot \mathbf{E}_2 \\ \mathbf{S}_1 \cdot \mathbf{S} \\ \mathbf{S}_2 \cdot \mathbf{D} \end{bmatrix} \]
+		<p>with \(\mathbf{E}_1 = \mathbf{P}_1 - \mathbf{P}_0\), \(\mathbf{E}_2 = \mathbf{P}_2 - \mathbf{P}_0\), \(\mathbf{S} = \mathbf{O} - \mathbf{P}_0\), \(\mathbf{S}_1 = \mathbf{D} \times \mathbf{E}_2\) and \(\mathbf{S}_2 = \mathbf{S} \times \mathbf{E}_1\). The ray hits the triangle when \(b_1, b_2 \ge 0\), \(b_1 + b_2 \le 1\) and \(t\) is in range. A denominator near zero means the ray is parallel to the triangle, so it misses. I blend the three vertex normals with the same weights, which makes curved meshes look smooth.</p>
+
+		<h3>Results</h3>
 		<div style="display: flex; flex-direction: column; align-items: center;">
 			<table style="width: 100%; text-align: center; border-collapse: collapse;">
-			  <tr>
+			  <tbody><tr>
 				<td style="text-align: center;">
-				  <img src="assets/cornell.png" width="400px"/>
-				  <figcaption>Caption goes here.</figcaption>
+				  <img src="assets/p1_CBempty.png" width="400px">
+				  <figcaption>CBempty.dae</figcaption>
 				</td>
 				<td style="text-align: center;">
-				  <img src="assets/cornell.png" width="400px"/>
-				  <figcaption>Caption goes here.</figcaption>
+				  <img src="assets/p1_CBspheres_lambertian.png" width="400px">
+				  <figcaption>CBspheres_lambertian.dae</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p1_banana.png" width="400px">
+				  <figcaption>banana.dae</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p1_CBgems.png" width="400px">
+				  <figcaption>CBgems.dae</figcaption>
 				</td>
 			  </tr>
 			  <tr>
 				<td style="text-align: center;">
-				  <img src="assets/cornell.png" width="400px"/>
-				  <figcaption>Caption goes here.</figcaption>
+				  <img src="assets/p1_CBcoil.png" width="400px">
+				  <figcaption>CBcoil.dae, coil</figcaption>
 				</td>
 				<td style="text-align: center;">
-				  <img src="assets/cornell.png" width="400px"/>
-				  <figcaption>Caption goes here.</figcaption>
+				  <img src="assets/p1_CBbunny.png" width="400px">
+				  <figcaption>CBbunny.dae, Stanford bunny</figcaption>
 				</td>
 			  </tr>
-			</table>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p1_cow.png" width="400px">
+				  <figcaption>cow.dae</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p1_teapot.png" width="400px">
+				  <figcaption>teapot.dae</figcaption>
+				</td>
+			  </tr>
+			</tbody></table>
 		</div>
-		
-		<h2>Part 2: Bounding Volume Hierarchy</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
 
-		<h2>Part 3: Direct Illumination</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
 
-		<h2>Part 4: Global Illumination</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-
-		<h2>Part 5: Adaptive Sampling</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-
-		<h2>(Optional) Part 6: Extra Credit Opportunities</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-		
-		<h2>Additional Notes (please remove)</h2>
-		<ul>
-			<li>You can also add code if you'd like as so: <code>code code code</code></li>
-			<li>If you'd like to add math equations, 
-				<ul>
-					<li>You can write inline equations like so: \( a^2 + b^2 = c^2 \)</li>
-					<li>You can write display equations like so: \[ a^2 + b^2 = c^2 \]</li>
-				</ul>
-			</li>
-		</ul>
 		</div>
-	</body>
-</html>
+	
+
+</body></html>
