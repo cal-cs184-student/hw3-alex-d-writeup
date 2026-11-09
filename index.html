@@ -252,6 +252,214 @@
 		<h3>Analysis</h3>
 		<p>With the same number of samples, light sampling is far less noisy than uniform hemisphere sampling. The area light covers only a small part of the hemisphere above each point, so most uniform samples miss it and add zero, while the few that hit add a large value. That gives a high-variance estimate, which shows up as grain over every surface in the hemisphere renders. Light sampling sends every sample toward the light, so a sample is wasted only when the point is actually in shadow. The result is smooth walls and clean soft shadows at the same sample count, and the light-sampled bunny even rendered faster (18 s vs. 28 s). Both methods converge to the same image, but light sampling gets there with far fewer samples. One visible difference is that the hemisphere renders show a glow around the light on the ceiling. Hemisphere sampling treats the light as emitting in every direction, while the light-sampling code models the area light's direction of emission.</p>
 
+				<h2>Part 4: Global Illumination</h2>
+
+		<h3>Indirect lighting implementation</h3>
+		<p>Global illumination adds the light that reaches a point after bouncing off other surfaces, which I estimate by tracing a path one random bounce at a time. To pick each bounce direction, <code>DiffuseBSDF::sample_f</code> draws \(\omega_i\) from a cosine-weighted hemisphere sampler, so \(p(\omega_i) = \frac{\cos\theta_i}{\pi}\), and returns \(f = \frac{\rho}{\pi}\). Directions near the normal contribute the most to the reflection equation, so sampling them more often lowers variance.</p>
+
+		<p><code>est_radiance_global_illumination</code> traces the camera ray and returns the environment light (black here) if it misses. If <code>max_ray_depth</code> is 0, it returns only the zero-bounce emission. Otherwise it adds the zero-bounce emission to <code>at_least_one_bounce_radiance</code>. Each camera ray starts with <code>depth = max_ray_depth</code>, and every bounce lowers it by one, so the depth counts how many bounces the path still has left.</p>
+
+		<p><code>at_least_one_bounce_radiance</code> first adds the direct lighting at the hit point from Part 3. It stops once the depth reaches 1. Otherwise it samples a new direction with <code>sample_f</code>, casts a ray from the hit point with depth \(-1\), and, if that ray hits something, calls itself recursively at the new hit point. The returned radiance is weighted the same way as in the direct lighting estimator:</p>
+		\[ L_{out} \mathrel{+}= \frac{f(\omega_i \to \omega_o)\, L_{in}\, \cos\theta_i}{p(\omega_i)\; p_{rr}}. \]
+		<p>The extra \(p_{rr}\) comes from Russian roulette. After the first bounce, which is always taken, a path continues with probability \(p_{rr} = 0.65\) and is cut off otherwise. Dividing the surviving paths by \(p_{rr}\) keeps the estimate unbiased, because the paths that continue make up for the ones that were cut. Without this, <code>-m 100</code> would trace 100 bounces for every sample.</p>
+
+		<p>The <code>-o</code> flag (<code>isAccumBounces</code>) controls whether bounces are summed. With <code>-o 1</code>, every hit adds its direct lighting, so the image holds all bounces up to the max depth. With <code>-o 0</code>, the zero-bounce term is skipped and only the last hit on the path (depth 1) adds direct lighting, so the image shows only light that bounced exactly <code>max_ray_depth</code> times.</p>
+
+		<h3>Global illumination results</h3>
+		<p>All of these use 1024 samples per pixel, 1 light ray and a max ray depth of 5.</p>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p4_gi_spheres.png" width="400px">
+				  <figcaption>CBspheres_lambertian.dae</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p4_gi_dragon.png" width="400px">
+				  <figcaption>dragon.dae</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p4_gi_wall-e.png" width="400px">
+				  <figcaption>wall-e.dae</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+
+		<h3>Direct vs. indirect illumination</h3>
+		<p>Both use CBspheres_lambertian with 1024 samples per pixel and 1 light ray. The direct image uses a max depth of 1. For the indirect image, I built a copy of the renderer whose <code>at_least_one_bounce_radiance</code> skips the direct lighting term at the first hit, so only bounced light remains (max depth 5).</p>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p4_direct.png" width="400px">
+				  <figcaption>Only direct illumination</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p4_indirect.png" width="400px">
+				  <figcaption>Only indirect illumination</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+
+		<p>Direct illumination alone looks harsh, because only surfaces that can see the light get any light. The ceiling is black, since the light faces down and no part of the ceiling faces it, and the shadows under the spheres and the bottoms of the spheres are pure black. The indirect image is almost the opposite. It is dim and soft, and it is brightest exactly where the direct image is dark: the ceiling, the shadowed floor and the undersides of the spheres. It also shows color bleeding, since light that bounces off the red and blue walls tints the spheres and the nearby floor. The light itself is black in the indirect image because the emission is zero-bounce light. Adding the two gives the full global illumination image above.</p>
+
+		<h3>Bounces of light on CBbunny</h3>
+		<p>These use CBbunny with 1024 samples per pixel and 1 light ray. The first row shows only the \(m\)th bounce of light (<code>-o 0</code>), and the second shows all bounces summed up to depth \(m\) (<code>-o 1</code>).</p>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p4_noacc_m0.png" width="400px">
+				  <figcaption>Bounce 0 only</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p4_noacc_m1.png" width="400px">
+				  <figcaption>Bounce 1 only</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p4_noacc_m2.png" width="400px">
+				  <figcaption>Bounce 2 only</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p4_noacc_m3.png" width="400px">
+				  <figcaption>Bounce 3 only</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p4_noacc_m4.png" width="400px">
+				  <figcaption>Bounce 4 only</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p4_noacc_m5.png" width="400px">
+				  <figcaption>Bounce 5 only</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p4_acc_m0.png" width="400px">
+				  <figcaption>max_ray_depth = 0, accumulated</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p4_acc_m1.png" width="400px">
+				  <figcaption>max_ray_depth = 1, accumulated</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p4_acc_m2.png" width="400px">
+				  <figcaption>max_ray_depth = 2, accumulated</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p4_acc_m3.png" width="400px">
+				  <figcaption>max_ray_depth = 3, accumulated</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p4_acc_m4.png" width="400px">
+				  <figcaption>max_ray_depth = 4, accumulated</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p4_acc_m5.png" width="400px">
+				  <figcaption>max_ray_depth = 5, accumulated</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+
+		<p>Each bounce is dimmer than the one before. Every diffuse surface absorbs part of the light that hits it, so the energy left after each bounce shrinks by a factor of the albedo, which is why the 4th and 5th bounces are nearly black. The 2nd bounce is the one that changes the image the most. It lights the ceiling, fills in the bunny's shadow and the side of the bunny facing away from the light, and carries red and blue from the walls onto the bunny and the floor. The 3rd bounce looks like a dimmer and blurrier version of the 2nd, because by then the light has scattered off several surfaces and arrives from almost every direction.</p>
+
+		<p>In the accumulated images, going from depth 1 to 2 makes the biggest difference, turning the black ceiling and hard shadows into a softly lit room. Depths 3 to 5 only make the scene a little brighter, since each added bounce carries less light. This suggests that the 2nd and 3rd bounces are what make the render look realistic compared to rasterization. A rasterizer only computes direct lighting and fakes the rest with a constant ambient term, which brightens everything equally. The real bounced light is uneven: it is stronger in corners and near bright surfaces, picks up the color of the walls it bounced off, and gives soft contact shadows under the bunny.</p>
+
+		<h3>Russian roulette</h3>
+		<p>These use CBbunny with 1024 samples per pixel, 1 light ray and Russian roulette, varying the max ray depth.</p>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p4_rr_m0.png" width="400px">
+				  <figcaption>max_ray_depth = 0</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p4_rr_m1.png" width="400px">
+				  <figcaption>max_ray_depth = 1</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p4_rr_m2.png" width="400px">
+				  <figcaption>max_ray_depth = 2</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p4_rr_m3.png" width="400px">
+				  <figcaption>max_ray_depth = 3</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p4_rr_m4.png" width="400px">
+				  <figcaption>max_ray_depth = 4</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p4_rr_m100.png" width="400px">
+				  <figcaption>max_ray_depth = 100</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+
+		<p>The images from depth 3 onward look almost the same, because the paths that survive past a few bounces carry very little light. Russian roulette also keeps depth 100 affordable. Each bounce after the first survives with probability 0.65, so a path makes about \(1/(1-0.65) \approx 2.9\) extra bounces on average, and almost none reach depth 100. The depth-100 render took 70 s, about the same as depth 4 (60 s).</p>
+
+		<h3>Samples per pixel</h3>
+		<p>These use CBspheres_lambertian with 4 light rays and a max depth of 5, varying the samples per pixel (<code>-s</code>).</p>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p4_spp1.png" width="400px">
+				  <figcaption>1 sample per pixel</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p4_spp2.png" width="400px">
+				  <figcaption>2 samples per pixel</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p4_spp4.png" width="400px">
+				  <figcaption>4 samples per pixel</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p4_spp8.png" width="400px">
+				  <figcaption>8 samples per pixel</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p4_spp16.png" width="400px">
+				  <figcaption>16 samples per pixel</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/p4_spp64.png" width="400px">
+				  <figcaption>64 samples per pixel</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/p4_spp1024.png" width="400px">
+				  <figcaption>1024 samples per pixel</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+
+		<p>At 1 sample per pixel, the image is covered in speckled noise. Each pixel follows one random path, so it either reaches the light or it doesn't, and the shadows and ceiling are very grainy. The noise drops as the sample count grows, because the error of a Monte Carlo estimate falls as \(1/\sqrt{n}\). Each 4x increase in samples halves the noise. At 16 samples the image is recognizable but still grainy, at 64 the grain is only visible on the ceiling and in the shadows, and at 1024 the image is clean. Areas lit mostly by indirect light, like the ceiling, stay noisy the longest, since only bounced paths reach them.</p>
+
 		</div>
 	
 
